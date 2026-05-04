@@ -1,7 +1,8 @@
 // static-mode shim (added by build_static.py)
 const STATIC_MODE = !/^(localhost|127\.0\.0\.1|loz\.local|192\.|10\.)/.test(location.hostname);
 window.STATIC_MODE = STATIC_MODE;
-function _proxyUrl(u){ return STATIC_MODE ? u : (_proxyUrl(u); }
+const _PROXY_PATH = '/' + 'proxy?u=';
+function _proxyUrl(u){ return STATIC_MODE ? u : (_PROXY_PATH + encodeURIComponent(u)); }
 // =============================================================================
 //  Loz's World - the entire client.
 //
