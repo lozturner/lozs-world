@@ -1,0 +1,29 @@
+{
+  "_comment": "Loz's World - tweak any of these and refresh the browser. Edit with Notepad.",
+  "mouse": {
+    "sensitivity": 0.6,
+    "sensitivityX": 1.0,
+    "sensitivityY": 1.0,
+    "invertY": false,
+    "smoothing": 0.0,
+    "maxLookUpDeg": 85,
+    "maxLookDownDeg": 85,
+    "_help": {
+      "sensitivity": "Master mouse speed. 0.3 = slow/precise, 1.0 = fast. Try 0.4 to 0.8.",
+      "sensitivityX": "Per-axis horizontal multiplier. Keep 1.0 unless you want anisotropic.",
+      "sensitivityY": "Per-axis vertical multiplier. Drop to 0.7 if up/down feels too twitchy.",
+      "invertY": "true = pull mouse down to look up (flight-sim style).",
+      "smoothing": "0 = no smoothing (instant). 0.5 = soft. 0.85 = very smooth but laggy.",
+      "maxLookUpDeg": "Stop your camera from flipping past straight up. 85 is normal.",
+      "maxLookDownDeg": "Same for looking down."
+    }
+  },
+  "movement": {
+    "walkSpeed": 4.5,
+    "sprintSpeed": 9.0,
+    "verticalSpeed": 5.4
+  },
+  "world": {
+    "fovDeg": 70
+  }
+}

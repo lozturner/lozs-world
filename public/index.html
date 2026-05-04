@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Loz's World</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<!-- Polyfill for iOS Safari < 16.4 (importmap support) -->
+<script async src="/vendor/es-module-shims/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+  <!-- Immediate loading + error display, hidden once world.js boots. -->
+  <div id="boot" style="position:fixed;inset:0;z-index:1000;background:#f4efe2;color:#1c1814;
+       display:flex;align-items:center;justify-content:center;flex-direction:column;
+       font-family:-apple-system,system-ui,sans-serif;padding:24px;text-align:center;">
+    <div id="boot-msg" style="font-size:32px;margin-bottom:14px;font-weight:600;">Loading Loz's World...</div>
+    <div id="boot-detail" style="font-size:14px;color:#4a4339;max-width:540px;line-height:1.5;">
+      One moment - loading 3D engine and assets.<br><br>
+      Stuck here? Open <a href="/health" style="color:#2f5fb8;">/health</a> to check the server is reachable.
+    </div>
+    <pre id="boot-error" style="display:none;background:#fff;border:1px solid #c2682c;color:#c2682c;
+         padding:12px;border-radius:8px;margin-top:18px;font-size:11px;text-align:left;
+         max-width:90vw;overflow:auto;white-space:pre-wrap;"></pre>
+  </div>
+
+  <!-- Surface any module-load error so the page never silently goes blank. -->
+  <script>
+    window.addEventListener('error', function(e) {
+        var d = document.getElementById('boot-detail');
+        var x = document.getElementById('boot-error');
+        if (d) d.textContent = 'Something failed while loading.';
+        if (x) {
+            x.style.display = 'block';
+            x.textContent = (e.message || 'unknown error') +
+                (e.filename ? '\nin ' + e.filename + ':' + (e.lineno||'?') : '');
+        }
+    });
+    // If world.js doesn't run within 8 seconds, complain visibly.
+    window._bootWatchdog = setTimeout(function() {
+        var d = document.getElementById('boot-detail');
+        if (d && !window._bootCleared) {
+            d.innerHTML = 'Still loading... if this stays for long, check the browser console for errors. ' +
+                          'On older iPhone/iPad Safari (<16.4) ES modules with importmap may not work.';
+        }
+    }, 8000);
+  </script>
+
+  <!-- Top toolbar -->
+  <div id="toolbar">
+    <div class="tb-section">
+      <span class="tb-label">layout</span>
+      <button class="tb-layout active" data-layout="arc">Arc</button>
+      <button class="tb-layout" data-layout="row">Row</button>
+      <button class="tb-layout" data-layout="grid">Grid</button>
+      <button class="tb-layout" data-layout="stack">Stack</button>
+      <button class="tb-layout" data-layout="panorama">Pano</button>
+      <button class="tb-layout" data-layout="grid3d">3D</button>
+    </div>
+    <div class="tb-section" id="tb-urls">
+      <span class="tb-label">screens</span>
+      <!-- search bars are rendered into here by world.js so favourites etc. are dynamic -->
+    </div>
+    <div class="tb-section" style="margin-left: auto;">
+      <button class="fb-btn" id="btn-notes" title="Notes (N)">📝</button>
+      <button class="fb-btn" id="btn-settings" title="Settings (,)">⚙️</button>
+      <button id="tb-enter3d" class="tb-3d">Walk in 3D</button>
+    </div>
+  </div>
+
+  <div id="webgl"></div>
+  <div id="css3d"></div>
+
+  <div id="crosshair">+</div>
+
+  <!-- Welcome / pause overlay (visible when not in 3D mode AND not yet entered) -->
+  <div id="overlay" class="visible">
+    <div class="panel">
+      <h1>Loz's World</h1>
+      <p class="sub">A paper desk for your screens, your notes, your mess. Five live screens; drop any 3D file in.</p>
+      <button id="enter-btn" class="primary">Walk into the room</button>
+      <div class="controls">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp; <kbd>Mouse</kbd> look &nbsp;·&nbsp; <kbd>Shift</kbd> sprint &nbsp;·&nbsp; <kbd>Esc</kbd> drop the mouse</div>
+        <div><kbd>E</kbd> assign URL &nbsp;·&nbsp; <kbd>R</kbd> reload screen &nbsp;·&nbsp; <kbd>F</kbd> screen on/off &nbsp;·&nbsp; <kbd>G</kbd> grab object</div>
+        <div><kbd>Tab</kbd> click into a screen &nbsp;·&nbsp; <kbd>K</kbd> asset library &nbsp;·&nbsp; <kbd>N</kbd> notes &nbsp;·&nbsp; <kbd>,</kbd> settings</div>
+        <div>Drag any <kbd>.stl</kbd> <kbd>.obj</kbd> <kbd>.glb</kbd> <kbd>.gltf</kbd> <kbd>.fbx</kbd> <kbd>.dae</kbd> <kbd>.3ds</kbd> <kbd>.ply</kbd> file in to drop it in front of you</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HUD (during 3D mode) -->
+  <div id="hud">
+    <div id="hud-monitor"></div>
+    <div id="hud-screens"></div>
+    <div id="hud-status"></div>
+  </div>
+
+  <!-- URL prompt (E key while in 3D) -->
+  <div id="url-prompt" class="hidden">
+    <div class="panel">
+      <h2>Assign a URL or search</h2>
+      <input id="url-input" type="text" placeholder="news.ycombinator.com  -or-  what's the weather in london" autocomplete="off" />
+      <div class="btnrow">
+        <button id="url-paste">Paste</button>
+        <button id="url-cancel">Cancel</button>
+        <button id="url-ok" class="primary">Load</button>
+      </div>
+      <p class="hint">Type a URL, or just type what you want and we'll search for it. Empty + Load detaches the screen.</p>
+    </div>
+  </div>
+
+  <!-- Asset library -->
+  <aside id="library">
+    <header>
+      <h3>📦 Library</h3>
+      <div class="lib-header-actions">
+        <button id="library-refresh">Rescan</button>
+        <button id="library-close">Close</button>
+      </div>
+    </header>
+    <div class="lib-help">
+      Drop <code>.stl</code> <code>.obj</code> <code>.glb</code> <code>.gltf</code> <code>.fbx</code> <code>.dae</code> <code>.3ds</code> <code>.ply</code> files into <code>public/assets/</code> beside <code>server.js</code>, then Rescan.
+    </div>
+    <div id="library-list"></div>
+  </aside>
+
+  <!-- Notes overlay -->
+  <div id="notes">
+    <header>
+      <span>📝 notes</span>
+      <button id="notes-close">×</button>
+    </header>
+    <textarea id="notes-textarea" placeholder="Anything. Half thoughts. Loose ends. Saved automatically."></textarea>
+  </div>
+
+  <!-- Settings panel -->
+  <div id="settings">
+    <header>
+      <h3>⚙️ Settings - mouse shortcuts</h3>
+      <button id="settings-close">×</button>
+    </header>
+    <div class="settings-body">
+      <div class="settings-intro">
+        Map mouse gestures to actions. Two ways:
+        <strong>(a)</strong> describe what you want in plain English in the top box, copy the prompt below into ChatGPT/Claude, paste the JSON it gives you back into the bottom box.
+        <strong>(b)</strong> if you know the action name, just type the JSON directly: <code>{"action": "toggleNotes"}</code>.
+        Available action names are listed below; some accept arguments via <code>"args"</code>.
+      </div>
+      <div id="settings-actions-list"></div>
+      <div id="shortcut-rows"></div>
+      <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button id="copy-prompt">Copy LLM prompt</button>
+        <button id="settings-reset">Reset all</button>
+        <button id="settings-save" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live reload: server pushes "reload" via SSE when files change.  When the
+       node process restarts itself (server.js edits), EventSource auto-reconnects
+       and onopen-after-close triggers a reload too. -->
+  <script>
+    (function () {
+      try {
+        var es = new EventSource('/livereload');
+        var wasOpen = false, hadOpen = false;
+        es.addEventListener('open', function () {
+          if (hadOpen && !wasOpen) { location.reload(); return; }
+          hadOpen = true; wasOpen = true;
+        });
+        es.addEventListener('error', function () { wasOpen = false; });
+        es.addEventListener('message', function (e) {
+          if (e && e.data === 'reload') location.reload();
+        });
+      } catch (_) {}
+    })();
+  </script>
+
+  <script type="module" src="world.js"></script>
+  <!-- Always-visible keyboard cheat sheet -->
+  <div id="cheat">
+    <header>
+      <span>⌨️ keys</span>
+      <button id="cheat-toggle">hide</button>
+    </header>
+    <div class="row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk &nbsp;·&nbsp; <kbd>Space</kbd>/<kbd>Ctrl</kbd> up/down &nbsp;·&nbsp; <kbd>Shift</kbd> sprint</div>
+    <div class="row"><kbd>mouse</kbd> look (after click) &nbsp;·&nbsp; <kbd>Esc</kbd> drop the mouse</div>
+    <div class="row"><kbd>E</kbd> URL &nbsp;·&nbsp; <kbd>R</kbd> reload &nbsp;·&nbsp; <kbd>F</kbd> screen on/off &nbsp;·&nbsp; <kbd>G</kbd> grab</div>
+    <div class="row"><kbd>Tab</kbd> click into screen &nbsp;·&nbsp; <kbd>K</kbd> library &nbsp;·&nbsp; <kbd>N</kbd> notes &nbsp;·&nbsp; <kbd>,</kbd> settings</div>
+  </div>
+
+  <script>
+    // Once world.js completes its initial tick, this runs and hides the boot overlay.
+    // world.js sets window._bootCleared = true near the end of its module body.
+    (function poll() {
+        if (window._bootCleared) {
+            clearTimeout(window._bootWatchdog);
+            var b = document.getElementById('boot');
+            if (b) b.style.display = 'none';
+            return;
+        }
+        setTimeout(poll, 80);
+    })();
+  </script>
+
+</body>
+</html>

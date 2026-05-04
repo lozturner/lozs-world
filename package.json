@@ -1,0 +1,17 @@
+{
+  "name": "lozs-world",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tron-style local 3D environment with up-to-five live web monitors and STL drag-drop.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "http-proxy-middleware": "^3.0.0",
+    "bonjour-service": "^1.2.1",
+    "three": "0.160.1",
+    "es-module-shims": "^1.10.0"
+  }
+}

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Loz's World - tool mode</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #f4efe2; --paper-warm: #ece4d2; --ink: #1c1814;
+    --ink-soft: #4a4339; --ink-faint: #8a8174; --accent: #2f5fb8;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--paper); color: var(--ink);
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  }
+  body { display: flex; flex-direction: column; }
+
+  header {
+    padding: 10px 14px;
+    background: rgba(244, 239, 226, 0.96);
+    border-bottom: 1.5px solid var(--ink);
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  header h1 {
+    margin: 0 12px 0 0;
+    font-family: 'Caveat', cursive; font-size: 28px; font-weight: 600;
+    transform: rotate(-1.5deg);
+  }
+  header .layout-buttons { display: flex; gap: 4px; flex-wrap: wrap; }
+  header button, header a.btn {
+    font-family: 'Inter', sans-serif;
+    background: var(--paper); border: 1.5px solid var(--ink); color: var(--ink);
+    padding: 5px 12px; border-radius: 999px;
+    font-size: 12px; cursor: pointer;
+    text-decoration: none;
+    box-shadow: 0 1px 0 var(--ink);
+  }
+  header button.active { background: var(--ink); color: var(--paper); }
+
+  /* Layouts ------------------------------------------------------- */
+  main { flex: 1; padding: 8px; overflow: auto; }
+  main.grid    { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; }
+  main.grid > .screen:nth-child(4) { grid-column: 1 / 3; }
+  main.grid > .screen:nth-child(5) { grid-column: 3 / 4; }
+  main.row     { display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: 1fr; gap: 8px; }
+  main.stack   { display: grid; grid-template-columns: 1fr; grid-template-rows: repeat(5, 1fr); gap: 8px; }
+  main.focus   { display: grid; grid-template-columns: 1fr; grid-template-rows: 1fr; gap: 8px; }
+  main.focus > .screen:not(:first-child) { display: none; }
+
+  .screen {
+    display: flex; flex-direction: column;
+    border: 1.5px solid var(--ink); border-radius: 10px;
+    overflow: hidden;
+    background: white;
+    min-height: 220px;
+  }
+  .screen .bar {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--ink-soft);
+    background: var(--paper-warm);
+    display: flex; gap: 6px;
+  }
+  .screen .bar input {
+    flex: 1;
+    background: white;
+    border: 1px solid var(--ink-soft); border-radius: 999px;
+    padding: 4px 12px; font-size: 12px; font-family: inherit;
+    color: var(--ink); min-width: 0;
+  }
+  .screen iframe {
+    flex: 1; border: 0; width: 100%; background: white;
+  }
+  .screen .placeholder {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    font-family: 'Caveat', cursive; font-size: 32px; color: var(--ink-faint);
+  }
+  footer {
+    padding: 6px 14px; font-size: 11px; color: var(--ink-faint);
+    border-top: 1px solid var(--ink-faint);
+    background: rgba(244, 239, 226, 0.96);
+  }
+  footer a { color: var(--accent); }
+  @media (max-width: 700px) {
+    main.grid, main.row { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
+    main.grid > .screen:nth-child(4), main.grid > .screen:nth-child(5) { grid-column: auto; }
+    header h1 { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Loz's World</h1>
+  <div class="layout-buttons">
+    <button data-layout="grid"  class="active">Grid</button>
+    <button data-layout="row">Row</button>
+    <button data-layout="stack">Stack</button>
+    <button data-layout="focus">Focus</button>
+  </div>
+  <a href="/" class="btn" style="margin-left: auto;">3D mode →</a>
+</header>
+
+<main class="grid" id="screens">
+  <div class="screen"><div class="bar"><input data-i="0" placeholder="1: paste a URL or search, then Enter" /></div><div class="placeholder">screen 1</div></div>
+  <div class="screen"><div class="bar"><input data-i="1" placeholder="2: paste a URL or search, then Enter" /></div><div class="placeholder">screen 2</div></div>
+  <div class="screen"><div class="bar"><input data-i="2" placeholder="3: paste a URL or search, then Enter" /></div><div class="placeholder">screen 3</div></div>
+  <div class="screen"><div class="bar"><input data-i="3" placeholder="4: paste a URL or search, then Enter" /></div><div class="placeholder">screen 4</div></div>
+  <div class="screen"><div class="bar"><input data-i="4" placeholder="5: paste a URL or search, then Enter" /></div><div class="placeholder">screen 5</div></div>
+</main>
+
+<footer>
+  Tool mode - works on any browser, no 3D engine. Try the <a href="/">full 3D world</a> on a recent desktop browser.
+</footer>
+
+<script>
+// Restore from localStorage (compatible with the 3D world's keys).
+var TOOL_KEY = 'lozsworld.tool.urls.v1';
+function loadUrls() {
+  try { return JSON.parse(localStorage.getItem(TOOL_KEY) || '[]'); }
+  catch (e) { return []; }
+}
+function saveUrls(arr) {
+  try { localStorage.setItem(TOOL_KEY, JSON.stringify(arr)); }
+  catch (e) {}
+}
+
+function isUrlLike(s) {
+  s = (s || '').trim();
+  if (!s) return false;
+  if (/^https?:\/\//i.test(s)) return true;
+  if (/^[a-z0-9-]+\.[a-z]{2,}(\/.*)?$/i.test(s)) return true;
+  return false;
+}
+function resolve(s) {
+  s = s.trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return '/proxy?u=' + encodeURIComponent(s);
+  if (isUrlLike(s)) return '/proxy?u=' + encodeURIComponent('https://' + s);
+  return '/proxy?u=' + encodeURIComponent('https://duckduckgo.com/?q=' + encodeURIComponent(s));
+}
+
+function loadScreen(i, raw) {
+  var screens = document.querySelectorAll('#screens .screen');
+  var sc = screens[i]; if (!sc) return;
+  // remove existing iframe / placeholder
+  Array.prototype.forEach.call(sc.querySelectorAll('iframe, .placeholder'), function (n) { n.parentNode.removeChild(n); });
+  if (!raw) {
+    var ph = document.createElement('div'); ph.className = 'placeholder';
+    ph.textContent = 'screen ' + (i + 1);
+    sc.appendChild(ph);
+    return;
+  }
+  var f = document.createElement('iframe');
+  f.referrerPolicy = 'no-referrer';
+  f.src = resolve(raw);
+  sc.appendChild(f);
+}
+
+var saved = loadUrls();
+for (var i = 0; i < 5; i++) {
+  var el = document.querySelector('input[data-i="' + i + '"]');
+  if (el && saved[i]) { el.value = saved[i]; loadScreen(i, saved[i]); }
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.target && e.target.tagName === 'INPUT' && e.key === 'Enter') {
+    var i = parseInt(e.target.getAttribute('data-i'), 10);
+    var v = e.target.value.trim();
+    var arr = loadUrls(); arr[i] = v; saveUrls(arr);
+    loadScreen(i, v);
+    e.target.blur();
+  }
+});
+
+document.querySelectorAll('header [data-layout]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('header [data-layout]').forEach(function (x) { x.classList.remove('active'); });
+    b.classList.add('active');
+    document.getElementById('screens').className = b.getAttribute('data-layout');
+  });
+});
+</script>
+</body>
+</html>
