@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Loz's World</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<script async src="vendor/es-module-shims/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/build/three.module.js",
+    "three/addons/": "./vendor/three/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+  <div id="boot" style="position:fixed;inset:0;z-index:1000;background:#f4efe2;color:#1c1814;
+       display:flex;align-items:center;justify-content:center;flex-direction:column;
+       font-family:-apple-system,system-ui,sans-serif;padding:24px;text-align:center;">
+    <div id="boot-msg" style="font-size:32px;margin-bottom:14px;font-weight:600;">Loading Loz's World...</div>
+    <div id="boot-detail" style="font-size:14px;color:#4a4339;max-width:560px;line-height:1.5;">
+      One moment - loading 3D engine and assets.<br><br>
+      <strong>This is the public, static, GitHub-Pages build.</strong>
+      Many sites refuse to load in iframes (X-Frame-Options); for those, run Loz World locally to get the proxy.
+    </div>
+    <pre id="boot-error" style="display:none;background:#fff;border:1px solid #c2682c;color:#c2682c;
+         padding:12px;border-radius:8px;margin-top:18px;font-size:11px;text-align:left;
+         max-width:90vw;overflow:auto;white-space:pre-wrap;"></pre>
+  </div>
+
+  <script>
+    window.addEventListener('error', function(e) {
+        var d = document.getElementById('boot-detail');
+        var x = document.getElementById('boot-error');
+        if (d) d.textContent = 'Something failed while loading.';
+        if (x) {
+            x.style.display = 'block';
+            x.textContent = (e.message || 'unknown error') +
+                (e.filename ? '\nin ' + e.filename + ':' + (e.lineno||'?') : '');
+        }
+    });
+    window._bootWatchdog = setTimeout(function() {
+        var d = document.getElementById('boot-detail');
+        if (d && !window._bootCleared) {
+            d.innerHTML = 'Still loading... if this stays for long, check the browser console for errors.';
+        }
+    }, 8000);
+  </script>
+
+  <div id="toolbar">
+    <div class="tb-section">
+      <span class="tb-label">layout</span>
+      <button class="tb-layout active" data-layout="arc">Arc</button>
+      <button class="tb-layout" data-layout="row">Row</button>
+      <button class="tb-layout" data-layout="grid">Grid</button>
+      <button class="tb-layout" data-layout="stack">Stack</button>
+      <button class="tb-layout" data-layout="panorama">Pano</button>
+      <button class="tb-layout" data-layout="grid3d">3D</button>
+    </div>
+    <div class="tb-section" id="tb-urls">
+      <span class="tb-label">screens</span>
+    </div>
+    <div class="tb-section" style="margin-left: auto;">
+      <button class="fb-btn" id="btn-notes" title="Notes (N)">notes</button>
+      <button class="fb-btn" id="btn-settings" title="Settings (,)">settings</button>
+      <button id="tb-enter3d" class="tb-3d">Walk in 3D</button>
+    </div>
+  </div>
+
+  <div id="webgl"></div>
+  <div id="css3d"></div>
+
+  <div id="crosshair">+</div>
+
+  <div id="overlay" class="visible">
+    <div class="panel">
+      <h1>Loz's World</h1>
+      <p class="sub">A paper desk for your screens. Note: this is the public web build - many sites refuse to embed; for full proxying run locally.</p>
+      <button id="enter-btn" class="primary">Walk into the room</button>
+      <div class="controls">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &middot; <kbd>Mouse</kbd> look &middot; <kbd>Shift</kbd> sprint &middot; <kbd>Esc</kbd> drop the mouse</div>
+        <div><kbd>E</kbd> assign URL &middot; <kbd>R</kbd> reload &middot; <kbd>F</kbd> screen on/off &middot; <kbd>G</kbd> grab</div>
+        <div><kbd>Tab</kbd> click into a screen &middot; <kbd>K</kbd> library &middot; <kbd>N</kbd> notes &middot; <kbd>,</kbd> settings</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="hud">
+    <div id="hud-monitor"></div>
+    <div id="hud-screens"></div>
+    <div id="hud-status"></div>
+  </div>
+
+  <div id="url-prompt" class="hidden">
+    <div class="panel">
+      <h2>Assign a URL or search</h2>
+      <input id="url-input" type="text" placeholder="news.ycombinator.com  -or-  what's the weather in london" autocomplete="off" />
+      <div class="btnrow">
+        <button id="url-paste">Paste</button>
+        <button id="url-cancel">Cancel</button>
+        <button id="url-ok" class="primary">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <aside id="library">
+    <header>
+      <h3>Library</h3>
+      <div class="lib-header-actions">
+        <button id="library-refresh">Rescan</button>
+        <button id="library-close">Close</button>
+      </div>
+    </header>
+    <div class="lib-help">
+      Asset library is local-only. To bring your own 3D files, run Loz World locally.
+    </div>
+    <div id="library-list"></div>
+  </aside>
+
+  <div id="notes">
+    <header>
+      <span>notes</span>
+      <button id="notes-close">x</button>
+    </header>
+    <textarea id="notes-textarea" placeholder="Saved automatically in this browser."></textarea>
+  </div>
+
+  <div id="settings">
+    <header>
+      <h3>Settings - mouse shortcuts</h3>
+      <button id="settings-close">x</button>
+    </header>
+    <div class="settings-body">
+      <div class="settings-intro">
+        Map mouse gestures to actions. Type the JSON directly: <code>{"action": "toggleNotes"}</code>.
+      </div>
+      <div id="settings-actions-list"></div>
+      <div id="shortcut-rows"></div>
+      <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button id="copy-prompt">Copy LLM prompt</button>
+        <button id="settings-reset">Reset all</button>
+        <button id="settings-save" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="world.js"></script>
+
+  <div id="cheat">
+    <header>
+      <span>keys</span>
+      <button id="cheat-toggle">hide</button>
+    </header>
+    <div class="row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk &middot; <kbd>Space</kbd>/<kbd>Ctrl</kbd> up/down &middot; <kbd>Shift</kbd> sprint</div>
+    <div class="row"><kbd>mouse</kbd> look (after click) &middot; <kbd>Esc</kbd> drop the mouse</div>
+    <div class="row"><kbd>E</kbd> URL &middot; <kbd>R</kbd> reload &middot; <kbd>F</kbd> screen on/off &middot; <kbd>G</kbd> grab</div>
+    <div class="row"><kbd>Tab</kbd> click into screen &middot; <kbd>K</kbd> library &middot; <kbd>N</kbd> notes &middot; <kbd>,</kbd> settings</div>
+  </div>
+
+  <script>
+    (function poll() {
+        if (window._bootCleared) {
+            clearTimeout(window._bootWatchdog);
+            var b = document.getElementById('boot');
+            if (b) b.style.display = 'none';
+            return;
+        }
+        setTimeout(poll, 80);
+    })();
+  </script>
+
+</body>
+</html>
