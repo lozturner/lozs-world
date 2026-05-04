@@ -9,12 +9,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 <!-- Polyfill for iOS Safari < 16.4 (importmap support) -->
-<script async src="/vendor/es-module-shims/es-module-shims.js"></script>
+<script async src="vendor/es-module-shims/es-module-shims.js"></script>
 <script type="importmap">
 {
   "imports": {
-    "three": "/vendor/three/build/three.module.js",
-    "three/addons/": "/vendor/three/examples/jsm/"
+    "three": "./vendor/three/build/three.module.js",
+    "three/addons/": "./vendor/three/examples/jsm/"
   }
 }
 </script>
@@ -172,7 +172,7 @@
        and onopen-after-close triggers a reload too. -->
   
 
-  <script type="module" src="world.js"></script>
+  <script type="module" src="world.js?v=1777934070"></script>
   <!-- Always-visible keyboard cheat sheet -->
   <div id="cheat">
     <header>
