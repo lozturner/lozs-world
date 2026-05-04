@@ -341,14 +341,14 @@ class Item {
             this.screen.url = null;
         } else {
             const url = normalizeUrl(rawUrl);
-            this.screen.iframeEl.src = _proxyUrl((url);
+            this.screen.iframeEl.src = _proxyUrl(url);
             this.screen.url = url;
         }
     }
 
     reload() {
         if (this.screen?.url) {
-            this.screen.iframeEl.src = _proxyUrl((this.screen.url);
+            this.screen.iframeEl.src = _proxyUrl(this.screen.url);
         }
     }
 
