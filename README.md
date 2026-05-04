@@ -1,152 +1,89 @@
-# Loz's World
+# Loz's World 🌐✨
 
-A first-person 3D environment that runs entirely on `localhost`. Walk around,
-sit at five Tron-style monitor desks, drag any `.stl` / `.obj` / `.glb` / `.gltf` / `.fbx` / `.dae` / `.3ds` / `.ply` file
-into the window, grab and move it with your mouse, and turn any object into
-a live web screen. Six simultaneous screens, GPU-accelerated, no install
-beyond Node.
+> A little Tron-room you can walk around in, fill with your own stuff, and use as a memory palace, a dashboard, a desk, a daydream.
 
-## Quickstart
+![status](https://img.shields.io/badge/status-alive-00ffd0?style=flat-square)
+![platform](https://img.shields.io/badge/platform-Windows-1c1814?style=flat-square)
+![license](https://img.shields.io/badge/license-personal-c2682c?style=flat-square)
 
-1. Install Node.js LTS from https://nodejs.org (one-time).
-2. Double-click **`run.bat`**. The first run does `npm install` (~30 sec),
-   then starts the server and opens your browser at http://localhost:7777.
-3. Click **ENTER**, click anywhere to capture the mouse, walk around.
+## 🚀 Just want to try it?
 
-## Controls
+**👉 [Download `LozsWorld.exe` from the latest release](https://github.com/lozturner/lozs-world/releases/latest)**
 
-| Key                 | Action                                                                |
-| ------------------- | --------------------------------------------------------------------- |
-| `W` `A` `S` `D`     | Move                                                                  |
-| Mouse               | Look                                                                  |
-| `Shift`             | Sprint                                                                |
-| `Space` / `Ctrl`    | Rise / fall                                                           |
-| `E`                 | Assign a URL to whatever's in your crosshair (auto-attaches a screen) |
-| `R`                 | Reload that screen                                                    |
-| `F`                 | Toggle screen on/off for the object you're looking at (any object)    |
-| `G`                 | Grab the object in view; press G again to drop. Move it with mouselook |
-| `Tab`               | Click into a screen (release mouse + activate iframe). Tab/Esc back   |
-| `K`                 | Open / close the asset library panel                                  |
-| `Esc`               | Release the mouse                                                     |
-| Drag a file         | Drop `.stl` `.obj` `.glb` `.gltf` `.fbx` `.dae` `.3ds` `.ply` files in front of you |
+Double-click. Your browser opens. You're in. 🪩
 
-## What you'll find when you load in
+No install, no Node, no dependencies, no setup. Windows might ask "allow this through Firewall?" — say yes (it's only listening on your own machine and your home Wi-Fi, not the wider internet).
 
-A wide-arc room of five desks, each with its own screen. Chairs in front of
-each desk. A neon staircase against the back-left wall. Three decorative
-glow-edge blocks for vibe. The grid floor and rim lights are pure Tron.
+---
 
-You spawn in the centre, facing the desks.
+## 💭 The story
 
-## The asset library (`K`)
+I had a desk full of monitors and a head full of half-finished thoughts, and I kept wanting *one place* I could put everything — the websites I'm watching, the 3D bits I'm modelling, the loose ends. Not another app, not another tab. A **room**. Somewhere I could *walk into*.
 
-The slide-in panel on the left lists every model file inside
-`public/assets/`. Drop your `.stl`, `.obj`, `.glb`, `.gltf`, `.fbx`, `.dae`, `.3ds`, `.ply` files in there,
-press REFRESH (or close+reopen with `K`), and they'll appear with two
-spawn buttons:
+So I built it. Loz's World is a tiny Tron-style 3D environment that runs on your own computer, opens in your browser, and lets you:
 
-- **Spawn** - drops the model in front of your camera as a placed Item.
-- **Spawn + Screen** - same, but immediately attaches a live web screen to
-  its front face so you can paste a URL into it.
+- 🖥️ **Hang up to five live websites on the walls as monitors.** Real, working sites. You can watch a YouTube stream while you work, dashboard your home assistant, pin Wikipedia next to a search bar, whatever. The server here strips the headers that normally stop a site from being framed, so the iframes actually load instead of showing the usual "this site cannot be embedded" wall.
+- 🧊 **Drag any 3D model straight onto the world** — `.stl`, `.obj`, `.glb`, `.gltf`, `.fbx`, `.dae`, `.3ds`, `.ply`. Drop, see it, walk around it. Files land in the `assets/` folder next to the `.exe` and persist between sessions.
+- 🚶 **Walk around in first-person.** WASD + mouse. The grid floor glows. The cyan light hums. It's silly and it's also weirdly calming.
+- 🔍 **Open any website by typing it.** There's a search bar built in — type a URL, type a question, hit go. DuckDuckGo autocomplete runs server-side so the suggestions appear as fast as the desktop browser.
+- 🧠 **Use it as a memory palace.** This is the bit I really wanted. Stick a model of a thing in a corner, hang the relevant document on the wall next to it. Come back tomorrow, walk to that corner, and the memory's *located* — the way human memory actually works.
+- 📱 **Reach it from your phone or iPad** on the same Wi-Fi. The server prints a `loz.local` URL on startup. Stand up, pick up your tablet, and the room's still there.
 
-You can also drag a file straight onto the window without ever using the
-library; it'll spawn at your camera and pick the right loader by extension.
+It's a personal-scale toy. It's the desk I wanted.
 
-## Six screens, any object
+---
 
-Up to six screens can exist at once. The five desks already account for
-five (each is a screen-bearing object); promoting any other object to a
-screen with `F` will use your sixth slot. Detaching a screen frees its
-slot. The HUD shows current usage at the bottom-left.
+## 🪄 What's in the box
 
-The screen geometry is computed from the object's local-space bounding box,
-so it works on any shape - a chair, a block, a 200-triangle imported model.
+| | |
+|---|---|
+| **3D engine** | [Three.js](https://threejs.org) (vendored, no CDN required) |
+| **Server** | Node + Express, runs on `localhost:7777` |
+| **Live monitors** | DOM iframes positioned via `CSS3DRenderer` so 3D math + DOM stay in sync |
+| **Site embedding** | `/proxy` strips `X-Frame-Options` and CSP `frame-ancestors` |
+| **Search** | DuckDuckGo autocomplete proxied server-side |
+| **LAN access** | mDNS publishes `loz.local` so phones/iPads find it without an IP |
+| **Self-update** | Live-reload on file change while developing |
 
-## How the live web pages work
+---
 
-Browsers refuse to embed many sites in iframes due to `X-Frame-Options:
-DENY` or `Content-Security-Policy: frame-ancestors`. So `server.js` runs a
-same-origin proxy on `/proxy?u=<url>` that strips those headers. The world's
-iframes load `/proxy?u=https://example.com/...`. About 95% of the web works
-straight away.
+## 🧰 If you want to run from source
 
-## Memory and performance
+You only need this if you want to hack on it. To *use* it, just grab the .exe.
 
-- `MAX_ITEMS = 64`. When exceeded, the oldest non-fixed Item is disposed
-  (geometry, materials, iframe DOM all freed via Three.js's `.dispose()`).
-- `MAX_SCREENS = 6`. Promoting a 7th object to a screen refuses with a HUD
-  warning instead of silently failing.
-- All grabbed-object updates use camera-relative offsets so motion never
-  accumulates floating-point error over long sessions.
-- `/api/assets` is polled lazily (only when you open or refresh the
-  library), not on a timer - the world burns zero idle CPU on disk I/O.
-
-On an integrated-graphics i7 / 16 GB / fibre, five active screens stay
-above 60 FPS at 1080p in our tests. With a discrete GPU you can run all
-six and a dozen placed objects without breaking a sweat.
-
-## Persistence (schema-versioned)
-
-Layout is saved to localStorage as `lozsworld.layout.v2`. The schema
-records:
-- which fixed desks have URLs
-- which placed assets exist (sourceUrl + transform matrix)
-- whether each placed asset has a screen and its URL
-
-Reload the page and your room comes back exactly as you left it. The schema
-is versioned so v3 can migrate forward without losing your work.
-
-## Architecture at a glance
-
-```
-Browser
- +-- WebGL canvas  (Three.js)        room, lights, desks, chairs, stairs, blocks, grid
- +-- CSS3D layer   (CSS3DRenderer)   up to 6 iframes in 3D space, sharing the camera
- +-- First-person  (PointerLockControls + WASD)
- +-- Item system   (per-object grab, screen, dispose)
-
-Node server (server.js, port 7777)
- +-- Static  /              public/                                    (the world)
- +-- Proxy   /proxy?u=...   strips X-Frame-Options + CSP frame-ancestors
- +-- API     /api/assets    lists files in public/assets/
- +-- Static  /assets/...    streams the model files to the loader
+```bash
+git clone https://github.com/lozturner/lozs-world.git
+cd lozs-world
+npm install
+npm start
 ```
 
-## Files
+Open http://localhost:7777.
 
-- `server.js` - express + http-proxy-middleware + assets API (~110 lines)
-- `package.json` - two dependencies
-- `run.bat` - one-click launcher (`npm install` + `node server.js`)
-- `public/index.html` - page shell, importmap for Three.js r0.160
-- `public/styles.css` - HUD, overlay, library
-- `public/world.js` - the entire client (~1000 lines, the meat of the app)
-- `public/assets/` - drop your model files here
+To build a fresh `.exe`:
 
-## Customising the room
-
-Open `public/world.js`. Constants near the top:
-
-- `MONITOR_COUNT`, `MONITOR_RADIUS`, `ARC_DEG` - desk arrangement
-- `IFRAME_DOM_W`, `IFRAME_DOM_H`, `IFRAME_SCALE` - screen pixel size & world scale
-- `NEON_CYAN`, `NEON_MAGENTA`, `NEON_AMBER`, `NEON_LIME` - palette
-- `MAX_ITEMS`, `MAX_SCREENS` - resource caps
-- `ROOM_SIZE`, `ROOM_HEIGHT` - room dimensions
-
-The pre-loaded objects come from `makeDeskItem`, `makeChairItem`,
-`makeStaircaseItem`, `makeDecorBlock`. Copy any of them to add a new piece
-of furniture - they all use the same `Item` class, so any procedural mesh
-you add is grab-able and screen-able for free.
-
-## Diagnostics
-
-Open the browser DevTools console. `window.lozsworld` exposes:
-
-```js
-lozsworld.items                 // every live Item
-lozsworld.scene, .camera        // Three.js objects
-lozsworld.countScreens()        // current number of attached screens
-lozsworld.saveLayout()          // force-save now
-lozsworld.refreshLibrary()      // re-scan public/assets/
+```bash
+npm run build
+# → dist/LozsWorld.exe
 ```
 
-Useful when adding features without restarting.
+---
+
+## 🔐 A note on the proxy
+
+`/proxy?u=...` is what makes the live web monitors actually load anything. It also means anything you embed has its cookies briefly land on `localhost:7777` (or wherever you're running it). **Don't put authenticated personal accounts on a monitor** — keep banking, email, etc. in your normal browser. Pin public dashboards, news, video, references.
+
+The proxy is gated by a same-origin cookie that the page sets on first load, so nobody who finds the URL can use it as an open web proxy without first visiting the world.
+
+---
+
+## 🛠️ Files of note
+
+- [`server.js`](server.js) — Express server, proxy, search, LAN advertisement
+- [`public/world.js`](public/world.js) — the 3D world itself (Three.js scene, monitors, drag-drop, controls)
+- [`public/config.json`](public/config.json) — set the five default monitor URLs
+- [`NOTES.md`](NOTES.md) — design decisions and the alternatives I considered
+
+---
+
+Built with 🖤 by [Loz](https://github.com/lozturner).

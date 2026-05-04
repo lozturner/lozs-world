@@ -14,7 +14,14 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '7777', 10);
-const ASSETS_DIR = path.join(__dirname, 'public', 'assets');
+
+// Detect packaged-EXE mode (pkg snapshots __dirname into a virtual /snapshot/...
+// filesystem that's read-only and not visible to the user). When packaged we
+// write user assets next to the .exe so drag-dropped STLs persist.
+const IS_PACKAGED = typeof process.pkg !== 'undefined';
+const APP_DIR = __dirname;
+const DATA_DIR = IS_PACKAGED ? path.dirname(process.execPath) : __dirname;
+const ASSETS_DIR = path.join(DATA_DIR, 'public', 'assets');
 if (!fs.existsSync(ASSETS_DIR)) fs.mkdirSync(ASSETS_DIR, { recursive: true });
 
 // Same-origin gate for /proxy: any visitor of an HTML page on this origin
@@ -186,6 +193,12 @@ app.use((req, res, next) => {
     next();
 });
 
+// User-writable assets folder (next to the .exe in packaged mode) takes
+// precedence over the snapshot, so drag-dropped STLs are findable.
+app.use('/assets', express.static(ASSETS_DIR, {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=300'),
+}));
+
 app.use(express.static(path.join(__dirname, 'public'), {
     setHeaders: (res, fp) => {
         if (/\.(stl|obj|glb|gltf|fbx|dae|3ds|ply|png|jpg)$/i.test(fp))
@@ -229,7 +242,7 @@ try {
 }
 
 // Bind to 0.0.0.0 explicitly so other devices on the LAN can reach us.
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n  Loz's World online`);
     console.log(`  -------------------------------------------------------------`);
     console.log(`  On THIS computer:    http://localhost:${PORT}`);
@@ -244,4 +257,15 @@ app.listen(PORT, '0.0.0.0', () => {
     }
     console.log(`\n  Search suggest:      http://localhost:${PORT}/api/suggest?q=...`);
     console.log(`  Assets:              ${ASSETS_DIR}\n`);
+
+    // Packaged mode: auto-open the browser so users just double-click the .exe.
+    if (IS_PACKAGED) {
+        const { spawn } = require('child_process');
+        const url = `http://localhost:${PORT}`;
+        try {
+            if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' });
+            else if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' });
+            else spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+        } catch {}
+    }
 });
