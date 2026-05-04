@@ -1,12 +1,7 @@
-// ---- Static-mode detection (GitHub Pages, file://, any host without our server)
-const STATIC_MODE = !/^localhost(:|$)|^127\.0\.0\.1|^loz\.local|^192\./.test(location.host);
+// static-mode shim (added by build_static.py)
+const STATIC_MODE = !/^(localhost|127\.0\.0\.1|loz\.local|192\.|10\.)/.test(location.hostname);
 window.STATIC_MODE = STATIC_MODE;
-if (STATIC_MODE) console.log('[Loz] Static mode - no backend, iframe proxy disabled.');
-
-function _proxyUrl(u) {
-    if (window.STATIC_MODE) return u;
-    return '/proxy?u=' + encodeURIComponent(u);
-}
+function _proxyUrl(u){ return STATIC_MODE ? u : (_proxyUrl(u); }
 // =============================================================================
 //  Loz's World - the entire client.
 //
@@ -345,14 +340,14 @@ class Item {
             this.screen.url = null;
         } else {
             const url = normalizeUrl(rawUrl);
-            this.screen.iframeEl.src = '/proxy?u=' + encodeURIComponent(url);
+            this.screen.iframeEl.src = _proxyUrl((url);
             this.screen.url = url;
         }
     }
 
     reload() {
         if (this.screen?.url) {
-            this.screen.iframeEl.src = '/proxy?u=' + encodeURIComponent(this.screen.url);
+            this.screen.iframeEl.src = _proxyUrl((this.screen.url);
         }
     }
 
@@ -2064,7 +2059,7 @@ const TabsPicker = (() => {
     function runScan() {
         setStatusText('Running tools/browser_scan.py - reading every browser history DB...');
         panel.querySelector('#tabs-run').disabled = true;
-        (STATIC_MODE ? Promise.reject(new Error('Tab-scan only works in the local desktop version (it reads your browser history files). Run Loz World locally to use it.')) : fetch('/api/scan-tabs'))
+        (window.STATIC_MODE ? Promise.reject(new Error('Tab scan only works in the local desktop version.')) : fetch('/api/scan-tabs'))
             .then(r => r.json())
             .then(j => {
                 if (j.error) {
@@ -2106,4 +2101,788 @@ const TabsPicker = (() => {
         }
     }
 
-    return { toggle, ge
+    return { toggle, get tabs() { return lastTabs; } };
+})();
+
+
+// Keyboard shortcuts: N for notes, comma for settings.
+window.addEventListener('keydown', (e) => {
+    if (e.target?.tagName === 'INPUT' || e.target?.tagName === 'TEXTAREA') return;
+    if (e.code === 'KeyN' && !controls.isLocked) {
+        Notes.toggle(); e.preventDefault();
+    } else if (e.code === 'Comma' && !controls.isLocked) {
+        Settings.toggle(); e.preventDefault();
+    }
+});
+
+// ---------- Situations (saved scenarios) -----------------------------------
+//
+// A Situation = the 5 URLs currently in the toolbar + the active layout, saved
+// with a name and a type tag. Two types:
+//   * "routine"  - reusable, e.g. "banking", "morning news"
+//   * "temporal" - tied to a date, e.g. "thursday standup 2026-05-08"
+//
+// Auto-classification looks for date words in the name and flags as temporal
+// when found. The user can flip the toggle when saving.
+
+const SITUATIONS_KEY = 'lozsworld.situations.v1';
+const TEMPORAL_HINTS = /(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday|last week|last month|\b20\d\d\b|\d{1,2}[\/\-]\d{1,2})/i;
+
+function loadSituations() {
+    try { return JSON.parse(localStorage.getItem(SITUATIONS_KEY) || '[]'); } catch { return []; }
+}
+function saveSituations(arr) {
+    try { localStorage.setItem(SITUATIONS_KEY, JSON.stringify(arr)); } catch {}
+}
+function autoClassify(name) {
+    return TEMPORAL_HINTS.test(name) ? 'temporal' : 'routine';
+}
+function snapshotCurrent(name) {
+    const urls = fixedDesks.map(d => d.screen?.url || '');
+    return {
+        id: 'sit_' + Date.now(),
+        name,
+        type: autoClassify(name),
+        date: new Date().toISOString().slice(0, 10),
+        layout: _currentLayout,
+        urls,
+        savedAt: Date.now(),
+    };
+}
+function applySituation(sit) {
+    if (!sit || !sit.urls) return;
+    sit.urls.forEach((url, i) => {
+        if (!fixedDesks[i]) return;
+        if (!url) { fixedDesks[i].setUrl(null); return; }
+        if (!fixedDesks[i].screen) fixedDesks[i].attachScreen(null);
+        fixedDesks[i].setUrl(url);
+    });
+    if (sit.layout && LAYOUTS[sit.layout]) applyLayout(sit.layout);
+    saveLayout();
+    setStatus(`Loaded situation: ${sit.name}`);
+}
+
+const Situations = (() => {
+    let panel = null;
+    function ensurePanel() {
+        if (panel) return panel;
+        panel = document.createElement('div');
+        panel.id = 'situations';
+        panel.innerHTML = `
+            <header>
+                <h3>💾 Situations</h3>
+                <button id="sit-close">×</button>
+            </header>
+            <div class="sit-body">
+                <div class="sit-save-row">
+                    <input id="sit-name" type="text" placeholder="Name this situation (e.g. 'banking', 'thursday research')" />
+                    <select id="sit-type">
+                        <option value="auto">auto</option>
+                        <option value="routine">routine</option>
+                        <option value="temporal">temporal</option>
+                    </select>
+                    <button id="sit-save" class="primary">Save current</button>
+                </div>
+                <div class="sit-tabs">
+                    <button class="sit-tab active" data-filter="all">All</button>
+                    <button class="sit-tab" data-filter="routine">Routines</button>
+                    <button class="sit-tab" data-filter="temporal">Temporal</button>
+                </div>
+                <div id="sit-list"></div>
+                <details class="sit-import">
+                    <summary>Import from browser history (paste JSON from <code>tools/browser_scan.py</code> output)</summary>
+                    <textarea id="sit-import-json" placeholder='Paste the JSON array. Latest 5 unique URLs across browsers become the new situation.' rows="6"></textarea>
+                    <div class="btnrow">
+                        <button id="sit-import-go" class="primary">Make a situation from this</button>
+                    </div>
+                </details>
+            </div>
+        `;
+        document.body.appendChild(panel);
+
+        panel.querySelector('#sit-close').addEventListener('click', () => toggle(false));
+        panel.querySelector('#sit-save').addEventListener('click', save);
+        panel.querySelectorAll('.sit-tab').forEach(b => b.addEventListener('click', () => {
+            panel.querySelectorAll('.sit-tab').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            render();
+        }));
+        panel.querySelector('#sit-import-go').addEventListener('click', importFromBrowsers);
+        return panel;
+    }
+
+    function activeFilter() {
+        return panel?.querySelector('.sit-tab.active')?.dataset.filter || 'all';
+    }
+    function render() {
+        if (!panel) return;
+        const list = panel.querySelector('#sit-list');
+        const filter = activeFilter();
+        const all = loadSituations().sort((a, b) => b.savedAt - a.savedAt);
+        const items = filter === 'all' ? all : all.filter(s => s.type === filter);
+        if (!items.length) {
+            list.innerHTML = `<div class="sit-empty">No ${filter === 'all' ? 'situations' : filter + ' situations'} yet. Save one above.</div>`;
+            return;
+        }
+        list.innerHTML = items.map(s => {
+            const filledCount = s.urls.filter(Boolean).length;
+            return `<div class="sit-row" data-id="${s.id}">
+                <div class="sit-name">${escapeHtml(s.name)}</div>
+                <div class="sit-meta">
+                    <span class="sit-type sit-type-${s.type}">${s.type}</span>
+                    <span class="sit-date">${s.date}</span>
+                    <span>${filledCount}/5 screens · ${s.layout}</span>
+                </div>
+                <div class="sit-actions">
+                    <button data-act="load">Load</button>
+                    <button data-act="delete">Delete</button>
+                </div>
+            </div>`;
+        }).join('');
+        list.querySelectorAll('[data-act="load"]').forEach(b =>
+            b.addEventListener('click', e => {
+                const id = e.target.closest('.sit-row').dataset.id;
+                const sit = loadSituations().find(x => x.id === id);
+                if (sit) applySituation(sit);
+            }));
+        list.querySelectorAll('[data-act="delete"]').forEach(b =>
+            b.addEventListener('click', e => {
+                const id = e.target.closest('.sit-row').dataset.id;
+                if (!confirm('Delete this situation?')) return;
+                saveSituations(loadSituations().filter(x => x.id !== id));
+                render();
+            }));
+    }
+
+    function save() {
+        const name = panel.querySelector('#sit-name').value.trim();
+        if (!name) { alert('Give it a name first.'); return; }
+        const typeSel = panel.querySelector('#sit-type').value;
+        const sit = snapshotCurrent(name);
+        if (typeSel !== 'auto') sit.type = typeSel;
+        const all = loadSituations();
+        all.push(sit);
+        saveSituations(all);
+        panel.querySelector('#sit-name').value = '';
+        render();
+        setStatus(`Saved situation: ${name}`);
+    }
+
+    function importFromBrowsers() {
+        const txt = panel.querySelector('#sit-import-json').value.trim();
+        if (!txt) return;
+        let arr;
+        try { arr = JSON.parse(txt); } catch { alert('That is not valid JSON.'); return; }
+        if (!Array.isArray(arr) || !arr.length) { alert('Expected a JSON array.'); return; }
+        // Dedupe URLs, keep first 5 by recency (lastVisit desc).
+        arr.sort((a, b) => (b.lastVisit || 0) - (a.lastVisit || 0));
+        const seen = new Set(); const picks = [];
+        for (const r of arr) {
+            const u = r.url || r.URL;
+            if (!u || seen.has(u)) continue;
+            seen.add(u); picks.push(u);
+            if (picks.length >= 5) break;
+        }
+        if (!picks.length) { alert('Could not find any URLs in that JSON.'); return; }
+        const sit = {
+            id: 'sit_' + Date.now(),
+            name: 'Imported ' + new Date().toLocaleString(),
+            type: 'temporal',
+            date: new Date().toISOString().slice(0, 10),
+            layout: _currentLayout,
+            urls: picks.concat(Array(5 - picks.length).fill('')),
+            savedAt: Date.now(),
+        };
+        const all = loadSituations(); all.push(sit); saveSituations(all);
+        applySituation(sit);
+        render();
+    }
+
+    function toggle(force) {
+        ensurePanel();
+        const open = (force === undefined) ? !panel.classList.contains('open') : !!force;
+        panel.classList.toggle('open', open);
+        if (open) {
+            if (controls.isLocked) controls.unlock();
+            render();
+        }
+    }
+    return { toggle, get isOpen() { return panel?.classList.contains('open'); }, render };
+})();
+
+// ---------- on-screen D-pad (one-hand mode) ----------------------------
+//
+// Always-visible 6-button gamepad in the bottom-right. Press-and-hold drives
+// the same `keys` registry that updateMovement() reads, so it's identical to
+// holding the keyboard key down. Works for mouse AND touch via pointer events.
+
+// ---------- On-screen gamepad HUD ---------------------------------------
+// One bottom-anchored composite cluster with:
+//   - left side: action-button ring (E/R/F/G/Tab/K/N/,) wrapped around the
+//     D-pad arrows + Space (rise) + Ctrl (fall).
+//   - right side: a virtual look-joystick + mouse-toggle button + ? help.
+// Designed for one-handed operation on touch screens AND mouse.
+const OnScreenPad = (() => {
+    const root = document.createElement('div');
+    root.id = 'pad';
+    root.innerHTML = `
+      <div class="pad-left">
+        <!-- top action row -->
+        <button class="pa pa-tl" data-key="KeyE"     title="URL prompt (E)">E</button>
+        <button class="pa pa-tm" data-key="KeyR"     title="reload screen (R)">R</button>
+        <button class="pa pa-tr" data-key="KeyF"     title="screen on/off (F)">F</button>
+        <!-- d-pad arrows -->
+        <button class="pa pa-up"    data-key="KeyW"        title="forward (W)">▲</button>
+        <button class="pa pa-left"  data-key="KeyA"        title="left (A)">◀</button>
+        <button class="pa pa-right" data-key="KeyD"        title="right (D)">▶</button>
+        <button class="pa pa-down"  data-key="KeyS"        title="back (S)">▼</button>
+        <!-- bottom action row -->
+        <button class="pa pa-bl" data-key="KeyG"     title="grab object (G)">G</button>
+        <button class="pa pa-bm" data-key="Tab"      title="click into screen (Tab)">⇥</button>
+        <button class="pa pa-br" data-key="KeyK"     title="library (K)">K</button>
+        <!-- side rise/fall -->
+        <button class="pa pa-rise" data-key="Space"        title="rise (Space)">⤒</button>
+        <button class="pa pa-fall" data-key="ControlLeft"  title="fall (Ctrl)">⤓</button>
+      </div>
+      <div class="pad-right">
+        <div class="pad-look" id="pad-look">
+          <div class="pad-look-stick" id="pad-look-stick"></div>
+        </div>
+        <div class="pad-row">
+          <button class="pa pa-mouse" id="pad-mouse" title="grab/release mouse (M)">🎯</button>
+          <button class="pa pa-act" data-key="KeyN"  title="notes (N)">N</button>
+          <button class="pa pa-act" data-key="Comma" title="settings (,)">⚙</button>
+          <button class="pa pa-help" id="pad-help" title="cheat sheet (/help)">?</button>
+        </div>
+      </div>
+      <button class="pad-hide" id="pad-hide" title="hide on-screen controls">×</button>
+      <button class="pad-show" id="pad-show" title="show on-screen controls">🎮</button>
+    `;
+    document.body.appendChild(root);
+
+    // ---- Movement-key buttons (W/A/S/D/Space/Ctrl): held while pressed.
+    function press(code, on) { keys[code] = on; }
+    function dispatchKey(type, code) {
+        // Dispatch a synthetic KeyboardEvent so any listener bound to keydown/keyup
+        // (the URL prompt, settings panel toggle, library toggle, etc.) reacts the
+        // same as a real keypress. Press *and* release so toggles work.
+        const evt = new KeyboardEvent(type, { code, key: code, bubbles: true });
+        window.dispatchEvent(evt);
+    }
+    root.querySelectorAll('.pa[data-key]').forEach(btn => {
+        const code = btn.dataset.key;
+        // Movement keys use held/released registry. Action keys fire keydown+keyup.
+        const isMovement = ['KeyW','KeyA','KeyS','KeyD','Space','ControlLeft'].includes(code);
+        const start = (e) => {
+            e.preventDefault();
+            btn.classList.add('held');
+            if (isMovement) press(code, true);
+            else dispatchKey('keydown', code);
+        };
+        const end = (e) => {
+            e.preventDefault();
+            btn.classList.remove('held');
+            if (isMovement) press(code, false);
+            else dispatchKey('keyup', code);
+        };
+        btn.addEventListener('pointerdown',   start);
+        btn.addEventListener('pointerup',     end);
+        btn.addEventListener('pointercancel', end);
+        btn.addEventListener('pointerleave',  end);
+        btn.addEventListener('contextmenu', e => e.preventDefault());
+    });
+
+    // ---- Mouse-toggle (grab/release).
+    const mouseBtn = root.querySelector('#pad-mouse');
+    function refreshMouseBtn() {
+        if (controls.isLocked) {
+            mouseBtn.textContent = '🖱'; mouseBtn.classList.add('locked');
+            mouseBtn.title = 'release mouse (M)';
+        } else {
+            mouseBtn.textContent = '🎯'; mouseBtn.classList.remove('locked');
+            mouseBtn.title = 'grab mouse (M)';
+        }
+    }
+    mouseBtn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (controls.isLocked) controls.unlock();
+        else enterMouseMode();
+    });
+    controls.addEventListener('lock', refreshMouseBtn);
+    controls.addEventListener('unlock', refreshMouseBtn);
+    refreshMouseBtn();
+
+    // ---- ? help button (open the cheat sheet).
+    root.querySelector('#pad-help').addEventListener('click', () => {
+        if (window.lozsworld?.Cmdline?.renderSheet) window.lozsworld.Cmdline.renderSheet(true);
+    });
+
+    // ---- Hide / show.
+    const hideBtn = root.querySelector('#pad-hide');
+    const showBtn = root.querySelector('#pad-show');
+    hideBtn.addEventListener('click', () => { root.classList.add('collapsed'); });
+    showBtn.addEventListener('click', () => { root.classList.remove('collapsed'); });
+
+    // ---- Virtual look-joystick.
+    // Pointer-down anywhere in the pad-look circle starts tracking.  As the
+    // pointer moves, we feed (dx, dy) deltas into controls.applyLook() each
+    // frame, scaled by how far from center the stick is.
+    const lookEl   = root.querySelector('#pad-look');
+    const stickEl  = root.querySelector('#pad-look-stick');
+    let _lookActive = false;
+    let _lookCenter = { x: 0, y: 0 };
+    let _lookOffset = { x: 0, y: 0 };
+    let _lookRadius = 1;
+    let _lookPid = null;
+
+    function lookStart(e) {
+        e.preventDefault();
+        const r = lookEl.getBoundingClientRect();
+        _lookCenter.x = r.left + r.width / 2;
+        _lookCenter.y = r.top  + r.height / 2;
+        _lookRadius = Math.min(r.width, r.height) / 2;
+        _lookActive = true;
+        _lookPid = e.pointerId;
+        try { lookEl.setPointerCapture(e.pointerId); } catch {}
+        lookEl.classList.add('active');
+        lookMove(e);
+    }
+    function lookMove(e) {
+        if (!_lookActive || (e.pointerId !== _lookPid && _lookPid !== null)) return;
+        let dx = e.clientX - _lookCenter.x;
+        let dy = e.clientY - _lookCenter.y;
+        const d = Math.hypot(dx, dy);
+        if (d > _lookRadius) { dx *= _lookRadius / d; dy *= _lookRadius / d; }
+        _lookOffset.x = dx; _lookOffset.y = dy;
+        stickEl.style.transform = `translate(${dx}px, ${dy}px)`;
+    }
+    function lookEnd(e) {
+        if (e && _lookPid !== null && e.pointerId !== _lookPid) return;
+        _lookActive = false;
+        _lookOffset.x = 0; _lookOffset.y = 0;
+        _lookPid = null;
+        stickEl.style.transform = 'translate(0, 0)';
+        lookEl.classList.remove('active');
+    }
+    lookEl.addEventListener('pointerdown',   lookStart);
+    lookEl.addEventListener('pointermove',   lookMove);
+    lookEl.addEventListener('pointerup',     lookEnd);
+    lookEl.addEventListener('pointercancel', lookEnd);
+    lookEl.addEventListener('pointerleave',  lookEnd);
+
+    // Per-frame: feed the joystick deltas into the controls.
+    //
+    // Tuning (all configurable):
+    //   DEADZONE   - fraction of radius treated as "no input" (kills jitter)
+    //   MAX_RATE   - max angular velocity at full deflection (radians/sec)
+    //   CURVE      - exponent on normalised magnitude. >1 = precise centre,
+    //                aggressive edge.
+    //
+    // Frame-rate independent: angular rate is multiplied by dt, so 30fps and
+    // 144fps produce the same rotation per second.
+    const LOOK_DEADZONE = 0.18;
+    const LOOK_MAX_RATE = 2.4;   // ~138 deg/sec at full stick
+    const LOOK_CURVE    = 2.2;
+    function tickLook(dt) {
+        if (!_lookActive) return;
+        const r = Math.max(_lookRadius, 1);
+        const nx = _lookOffset.x / r;        // -1..1
+        const ny = _lookOffset.y / r;
+        const mag = Math.hypot(nx, ny);
+        if (mag < LOOK_DEADZONE) return;     // ignore jitter near centre
+        const t  = Math.min(1, (mag - LOOK_DEADZONE) / (1 - LOOK_DEADZONE));
+        const speed = Math.pow(t, LOOK_CURVE) * LOOK_MAX_RATE;
+        const ux = nx / mag, uy = ny / mag;  // unit direction
+        const dyaw   = -ux * speed * dt;
+        const dpitch = -uy * speed * dt;
+        controls.applyLookRadians(dyaw, dpitch);
+    }
+    return { el: root, tickLook, refreshMouseBtn };
+})();
+// keep old name working in case anything references it
+const Dpad = OnScreenPad;
+
+// ---------- M-key shortcut for grab/release mouse -----------------------
+// (The visible button now lives inside OnScreenPad, defined below.)
+window.addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyM') return;
+    const a = document.activeElement;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
+    if (controls.isLocked) controls.unlock(); else enterMouseMode();
+});
+
+// ---------- In-app command line + cheat sheet --------------------------
+// Press `/` from anywhere (outside an input) to focus the command bar.
+// Type a command, Enter to run, Esc to dismiss.
+//
+// Built-ins:  /help /url /go /jump /layout /notes /lib /settings /lock
+//             /unlock /reload /clear /sit /cmd
+//
+// Custom commands: /cmd add NAME BODY   (BODY is any other command line).
+// Use $1, $2 ... in BODY to reference arguments. Persists in localStorage.
+const COMMANDS_KEY = 'lozsworld.commands.v1';
+const Cmdline = (() => {
+    const root = document.createElement('div');
+    root.id = 'cmdline';
+    root.innerHTML = `
+        <span class="cmd-prompt">/</span>
+        <input id="cmd-input" type="text" placeholder="type a command - /help for the cheat sheet" autocomplete="off" spellcheck="false" />
+        <button id="cmd-help" type="button" title="cheat sheet">?</button>
+    `;
+    document.body.appendChild(root);
+    const inp = root.querySelector('#cmd-input');
+    const helpBtn = root.querySelector('#cmd-help');
+
+    // Cheat-sheet panel
+    const sheet = document.createElement('div');
+    sheet.id = 'cmd-sheet';
+    sheet.innerHTML = `
+        <header>
+            <h3>⌘ command line cheat sheet</h3>
+            <button id="cmd-sheet-close" type="button">×</button>
+        </header>
+        <div class="cmd-sheet-body" id="cmd-sheet-body"></div>
+    `;
+    document.body.appendChild(sheet);
+    sheet.querySelector('#cmd-sheet-close').addEventListener('click', () => sheet.classList.remove('open'));
+
+    // Custom-command persistence
+    let custom = {};
+    try {
+        const raw = localStorage.getItem(COMMANDS_KEY);
+        if (raw) custom = JSON.parse(raw) || {};
+    } catch {}
+    function saveCustom() {
+        try { localStorage.setItem(COMMANDS_KEY, JSON.stringify(custom)); } catch {}
+    }
+
+    function assignUrl(idx, q) {
+        if (!Number.isFinite(idx) || idx < 0 || idx >= fixedDesks.length) {
+            setStatus('screen index out of range (use 1..' + fixedDesks.length + ')'); return;
+        }
+        if (!q || !q.trim()) { fixedDesks[idx].detachScreen(); setStatus('screen ' + (idx+1) + ' detached'); return; }
+        const u = q.trim();
+        if (/^https?:\/\//i.test(u) || /^[\w-]+\.[\w.-]+/.test(u)) {
+            const url = /^https?:\/\//i.test(u) ? u : 'https://' + u;
+            fixedDesks[idx].setUrl(url);
+            setStatus('screen ' + (idx+1) + ': ' + url);
+        } else {
+            (window.STATIC_MODE ? Promise.resolve({json:()=>({url:'https://duckduckgo.com/?q='+encodeURIComponent(u)})}) : fetch('/api/search?q=' + encodeURIComponent(u))
+                .then(r => r.json())
+                .then(j => { if (j.url) { fixedDesks[idx].setUrl(j.url); setStatus('screen ' + (idx+1) + ': searched "' + u + '"'); } })
+                .catch(() => setStatus('search failed'));
+        }
+    }
+
+    function situationsCmd(args) {
+        if (!args.length || args[0] === 'list') {
+            const list = loadSituations();
+            setStatus('situations: ' + (list.length ? list.map(s => s.name).join(', ') : '(none saved)'));
+            return;
+        }
+        if (args[0] === 'save' && args[1]) {
+            const name = args.slice(1).join(' ');
+            const list = loadSituations();
+            const existing = list.findIndex(x => x.name === name);
+            const sit = { name, urls: fixedDesks.map(d => d.screen?.url || null), createdAt: Date.now() };
+            if (existing >= 0) list[existing] = sit; else list.push(sit);
+            saveSituations(list);
+            setStatus('saved situation: ' + name); return;
+        }
+        if (args[0] === 'load' && args[1]) {
+            const name = args.slice(1).join(' ');
+            const s = loadSituations().find(x => x.name === name);
+            if (!s) { setStatus('no situation: ' + name); return; }
+            applySituation(s);
+            setStatus('loaded: ' + name); return;
+        }
+        setStatus('usage: /sit save NAME  |  /sit load NAME  |  /sit list');
+    }
+
+    function customCmd(args) {
+        const op = args[0];
+        if (op === 'list') {
+            const names = Object.keys(custom);
+            setStatus('custom: ' + (names.length ? names.join(', ') : '(none yet)'));
+            return;
+        }
+        if (op === 'rm' && args[1]) {
+            delete custom[args[1]]; saveCustom();
+            setStatus('removed: /' + args[1]); return;
+        }
+        if (op === 'add' && args.length >= 3) {
+            const name = args[1].replace(/^\//, '');
+            const body = args.slice(2).join(' ');
+            if (BUILTINS[name]) { setStatus('cannot override built-in /' + name); return; }
+            custom[name] = body;
+            saveCustom();
+            setStatus('added /' + name + ' -> ' + body);
+            return;
+        }
+        setStatus('usage: /cmd add NAME BODY   |  /cmd list  |  /cmd rm NAME');
+    }
+
+    const BUILTINS = {
+        help:    { desc: 'Show this cheat sheet.',                                                run: () => renderSheet(true) },
+        url:     { desc: '/url N URL  - assign URL (or search) to screen N (1..5)',               run: (n, ...rest) => assignUrl(parseInt(n,10)-1, rest.join(' ')) },
+        go:      { desc: '/go QUERY  - search and load into screen 1',                            run: (...q) => assignUrl(0, q.join(' ')) },
+        jump:    { desc: '/jump N  - fly camera to screen N',                                     run: (n) => jumpToMonitor(parseInt(n,10)-1) },
+        layout:  { desc: '/layout NAME  - arc | row | grid | stack | panorama | grid3d',          run: (name) => name && applyLayout(name) },
+        notes:   { desc: '/notes  - toggle the notes pad',                                        run: () => Notes.toggle() },
+        library: { desc: '/library  - toggle the asset library',                                  run: () => toggleLibrary() },
+        lib:     { desc: '/lib  - alias for /library',                                            run: () => toggleLibrary() },
+        settings:{ desc: '/settings  - toggle settings panel',                                    run: () => Settings.toggle() },
+        lock:    { desc: '/lock  - capture mouse (walk in 3D)',                                   run: () => enterMouseMode() },
+        unlock:  { desc: '/unlock  - release mouse',                                              run: () => controls.unlock() },
+        reload:  { desc: '/reload  - reload every assigned screen',                               run: () => fixedDesks.forEach(d => d.screen?.url && d.reload()) },
+        clear:   { desc: '/clear N  - empty screen N',                                            run: (n) => { const d = fixedDesks[parseInt(n,10)-1]; if (d) d.detachScreen(); } },
+        sit:     { desc: '/sit save NAME  |  /sit load NAME  |  /sit list  - save/load Situations', run: (...args) => situationsCmd(args) },
+        cmd:     { desc: '/cmd add NAME BODY  |  /cmd list  |  /cmd rm NAME  - manage custom commands at runtime', run: (...args) => customCmd(args) },
+    };
+
+    function run(line) {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) return;
+        let body = trimmed;
+        if (body.startsWith('/')) body = body.slice(1);
+        else { BUILTINS.go.run(...body.split(/\s+/)); return; }
+        const parts = body.split(/\s+/);
+        const name = parts[0];
+        const rest = parts.slice(1);
+        if (custom[name]) {
+            let expanded = custom[name];
+            rest.forEach((v, i) => { expanded = expanded.replace(new RegExp('\\$' + (i+1), 'g'), v); });
+            return run(expanded.startsWith('/') ? expanded : '/' + expanded);
+        }
+        if (BUILTINS[name]) {
+            try { BUILTINS[name].run(...rest); }
+            catch (e) { console.error(e); setStatus('error: ' + e.message); }
+            return;
+        }
+        setStatus('unknown command: /' + name + '  (try /help)');
+    }
+
+    // ---- Auto-slide behaviour. The bar is collapsed by default so it
+    // doesn't block the toolbar buttons underneath. It opens on:
+    //   - the small "/" tab being clicked
+    //   - the user pressing `/` from anywhere outside an input
+    //   - hovering the tab
+    // Closes on:
+    //   - Esc inside the input
+    //   - Enter (after running) auto-closes too
+    //   - Mouse leaving the bar with the input not focused
+    function open() {
+        root.classList.add('open');
+        setTimeout(() => inp.focus(), 50);
+    }
+    function close() {
+        root.classList.remove('open');
+        inp.blur();
+    }
+    root.addEventListener('mouseenter', () => root.classList.add('hover'));
+    root.addEventListener('mouseleave', () => {
+        root.classList.remove('hover');
+        if (document.activeElement !== inp) close();
+    });
+    root.querySelector('.cmd-prompt').addEventListener('click', open);
+
+    inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const v = inp.value;
+            inp.value = '';
+            run(v);
+            close();
+        } else if (e.key === 'Escape') {
+            close();
+        }
+        e.stopPropagation();
+    });
+    inp.addEventListener('blur', () => {
+        // Slight delay so clicking the ? button doesn't immediately close.
+        setTimeout(() => { if (!root.matches(':hover')) close(); }, 120);
+    });
+
+    // Global `/` to open + focus.
+    window.addEventListener('keydown', (e) => {
+        if (e.key !== '/') return;
+        const a = document.activeElement;
+        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
+        e.preventDefault();
+        if (controls.isLocked) controls.unlock();
+        open();
+    });
+
+    helpBtn.addEventListener('click', () => renderSheet(true));
+
+    function renderSheet(open) {
+        const body = sheet.querySelector('#cmd-sheet-body');
+        const rows = Object.entries(BUILTINS).map(([k, v]) =>
+            `<div class="cmd-row"><code>/${k}</code><div class="cmd-desc">${v.desc}</div></div>`
+        ).join('');
+        const customRows = Object.keys(custom).length
+            ? Object.entries(custom).map(([k, v]) =>
+                `<div class="cmd-row cmd-row-user"><code>/${k}</code><div class="cmd-desc">→ <code>${v}</code></div></div>`
+              ).join('')
+            : '<div class="cmd-empty">No custom commands yet. Try <code>/cmd add hn /url 1 news.ycombinator.com</code> then <code>/hn</code>.</div>';
+        body.innerHTML = `
+            <p class="cmd-intro">Press <kbd>/</kbd> from anywhere to focus the command line. <kbd>Enter</kbd> to run, <kbd>Esc</kbd> to dismiss. Commands without a leading <code>/</code> are treated as a search and loaded into screen 1.</p>
+            <h4>Built-in commands</h4>
+            ${rows}
+            <h4>Your custom commands</h4>
+            ${customRows}
+            <h4>Adding your own</h4>
+            <ul>
+                <li><code>/cmd add hn /url 1 news.ycombinator.com</code> - now <code>/hn</code> loads HN into screen 1.</li>
+                <li><code>/cmd add open /url $1 $2</code> - <code>/open 3 example.com</code> expands to <code>/url 3 example.com</code>.</li>
+                <li><code>/cmd add work /sit load deepwork</code> - one-key situation switching.</li>
+                <li><code>/cmd list</code> shows all custom commands. <code>/cmd rm NAME</code> removes one.</li>
+                <li>Custom commands persist in localStorage, survive reloads.</li>
+            </ul>
+        `;
+        if (open) sheet.classList.add('open');
+    }
+
+    return { run, focus: () => inp.focus(), renderSheet, get custom() { return custom; } };
+})();
+
+// ---------- Edit Mode + drag gizmo --------------------------------------
+// Top-right corner: a switch.  When ON, click any 3D item to attach a
+// Three.js TransformControls gizmo (X/Y/Z arrows) and drag it freely in
+// world space.  When OFF, normal walk-around behaviour is restored.
+import('three/addons/controls/TransformControls.js').then(mod => {
+    const TransformControls = mod.TransformControls;
+
+    const tc = new TransformControls(camera, webglRenderer.domElement);
+    tc.setSize(0.9);
+    tc.setSpace('world');
+    tc.visible = false;
+    tc.enabled = false;
+    scene.add(tc);
+
+    // Disable mouselook while the user is dragging the gizmo.
+    let _dragging = false;
+    tc.addEventListener('dragging-changed', (e) => {
+        _dragging = e.value;
+        document.body.classList.toggle('dragging-gizmo', _dragging);
+    });
+
+    // Clicking on the world picks the closest item and attaches the gizmo.
+    const _ray = new THREE.Raycaster();
+    const _ndc = new THREE.Vector2();
+    function pickAt(clientX, clientY) {
+        const r = webglRenderer.domElement.getBoundingClientRect();
+        _ndc.x = ((clientX - r.left) / r.width) * 2 - 1;
+        _ndc.y = -((clientY - r.top)  / r.height) * 2 + 1;
+        _ray.setFromCamera(_ndc, camera);
+        const meshes = items.map(it => it.object3d).filter(Boolean);
+        const hits = _ray.intersectObjects(meshes, true);
+        if (!hits.length) return null;
+        // Walk up to the registered item root.
+        let n = hits[0].object;
+        while (n && !items.some(it => it.object3d === n)) n = n.parent;
+        return n || null;
+    }
+    function onCanvasClick(ev) {
+        if (!EditMode.active) return;
+        if (_dragging) return;
+        if (controls.isLocked) return;          // walking-mode is sacred
+        if (ev.target !== webglRenderer.domElement) return;
+        const obj = pickAt(ev.clientX, ev.clientY);
+        if (obj) {
+            tc.attach(obj);
+            tc.visible = true;
+            tc.enabled = true;
+            setStatus('Editing - drag the arrows. Esc to deselect.');
+        } else {
+            tc.detach();
+            tc.visible = false;
+        }
+    }
+    webglRenderer.domElement.addEventListener('pointerdown', onCanvasClick);
+    window.addEventListener('keydown', (e) => {
+        if (!EditMode.active) return;
+        const a = document.activeElement;
+        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
+        if (e.code === 'Escape') { tc.detach(); tc.visible = false; }
+        if (e.code === 'KeyT') tc.setMode('translate');
+        if (e.code === 'KeyY') tc.setMode('rotate');
+        if (e.code === 'KeyU') tc.setMode('scale');
+    });
+
+    EditMode._tc = tc;
+});
+
+const EditMode = (() => {
+    const sw = document.createElement('button');
+    sw.id = 'edit-switch';
+    sw.title = 'Edit mode: click items to drag them in 3D (T translate / Y rotate / U scale)';
+    sw.innerHTML = `<span class="es-pill"></span><span class="es-label">edit</span>`;
+    document.body.appendChild(sw);
+    const state = { active: false, _tc: null };
+    function set(v) {
+        state.active = !!v;
+        sw.classList.toggle('on', state.active);
+        document.body.classList.toggle('edit-mode', state.active);
+        if (!state.active && state._tc) {
+            state._tc.detach();
+            state._tc.visible = false;
+        }
+        setStatus(state.active ? 'Edit mode ON - click any item' : 'Edit mode OFF');
+    }
+    sw.addEventListener('click', () => set(!state.active));
+    return state;
+})();
+
+// ---------- Orbit buttons (bottom-right) --------------------------------
+// Small cluster of left/right/up/down/zoom buttons that orbit the camera
+// around the room centre.  Each press nudges the orbit by a fixed step.
+const Orbiter = (() => {
+    const root = document.createElement('div');
+    root.id = 'orbit-pad';
+    root.innerHTML = `
+        <button class="op op-up"    title="orbit up">▲</button>
+        <button class="op op-left"  title="orbit left">◀</button>
+        <button class="op op-home"  title="overview (home)">⌂</button>
+        <button class="op op-right" title="orbit right">▶</button>
+        <button class="op op-down"  title="orbit down">▼</button>
+    `;
+    document.body.appendChild(root);
+    const STEP = 0.18;
+    function bindHold(btn, fn) {
+        let timer = null;
+        const start = (e) => {
+            e.preventDefault();
+            fn();
+            timer = setInterval(fn, 80);
+        };
+        const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+        btn.addEventListener('pointerdown', start);
+        btn.addEventListener('pointerup', stop);
+        btn.addEventListener('pointerleave', stop);
+        btn.addEventListener('pointercancel', stop);
+    }
+    bindHold(root.querySelector('.op-left'),  () => orbitCamera(-STEP, 0));
+    bindHold(root.querySelector('.op-right'), () => orbitCamera(+STEP, 0));
+    bindHold(root.querySelector('.op-up'),    () => orbitCamera(0, +STEP));
+    bindHold(root.querySelector('.op-down'),  () => orbitCamera(0, -STEP));
+    root.querySelector('.op-home').addEventListener('click', () => jumpToHome());
+    return { el: root };
+})();
+
+// ---------- diagnostics expose -------------------------------------------
+// Open the JS console and inspect lozsworld for live state. Useful when
+// teaching the engine to do something new without restarting it.
+window.lozsworld = {
+    items, scene, camera,
+    CONFIG,
+    countScreens, MAX_SCREENS, MAX_ITEMS,
+    saveLayout, restoreLayout,
+    spawnFromLibrary,
+    refreshLibrary,
+    applyLayout, LAYOUTS, cycleLayout,
+    Notes, Settings, Situations, TabsPicker, OnScreenPad, Dpad, Cmdline,
+    EditMode, Orbiter, jumpToMonitor, jumpToHome, orbitCamera,
+    ACTIONS, bindings, runBinding,
+    loadSituations, saveSituations, applySituation,
+};
