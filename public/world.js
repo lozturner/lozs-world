@@ -62,6 +62,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
 import { TDSLoader } from 'three/addons/loaders/TDSLoader.js';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+import { createBlocksRuntime } from './blocks.js';
 
 // ---------- runtime config (public/config.json) ----------------------------
 //
@@ -398,9 +399,11 @@ function countScreens() { return items.reduce((n, it) => n + (it.screen ? 1 : 0)
 
 function enforceItemCap() {
     if (items.length <= MAX_ITEMS) return;
-    // Recycle oldest non-fixed item first.
+    // Recycle oldest non-fixed, non-shell item first. Shell pieces (walls,
+    // floors, ceilings) are part of the room you're building and must not
+    // disappear because someone spawned a 65th decorative chair.
     for (const it of items) {
-        if (!it.fixed) {
+        if (!it.fixed && it.kind !== 'shell') {
             setStatus(`Item cap hit, recycled "${it.name}".`);
             it.dispose();
             return;
@@ -1231,10 +1234,23 @@ function escapeHtml(s) {
 }
 
 // ---------- persistence (schema-versioned) ---------------------------------
+// Block-builder runtime. Defined here (after Item, items, camera, setStatus,
+// and saveLayout are all in scope) so blocks.js stays a pure helper module.
+const Blocks = createBlocksRuntime({
+    Item, items, camera,
+    setStatus,
+    // saveLayout is hoisted (function declaration) so this closure resolves it
+    // every time the runtime calls it - including from inside restoreLayout.
+    saveLayout: () => saveLayout(),
+});
+Blocks.registerHotkeys();
+
 function saveLayout() {
     try {
         const layout = {
-            version: 2,
+            // v3 adds the `blocks` array. v2 readers will simply ignore it,
+            // and our restoreLayout below still accepts v2 payloads.
+            version: 3,
             screens: items
                 .filter(i => i.screen)
                 .map(i => ({
@@ -1246,7 +1262,7 @@ function saveLayout() {
                     url: i.screen.url,
                 })),
             placed: items
-                .filter(i => !i.fixed && i.sourceUrl)
+                .filter(i => !i.fixed && i.kind !== 'shell' && i.sourceUrl)
                 .map(i => ({
                     sourceUrl: i.sourceUrl,
                     name: i.name,
@@ -1254,6 +1270,7 @@ function saveLayout() {
                     hasScreen: !!i.screen,
                     screenUrl: i.screen?.url || null,
                 })),
+            blocks: Blocks.serialize(),
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
     } catch (err) {
@@ -1266,7 +1283,7 @@ async function restoreLayout() {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
         const layout = JSON.parse(raw);
-        if (layout.version !== 2) return;
+        if (layout.version !== 2 && layout.version !== 3) return;
 
         // 1. Restore desk URLs.
         for (const s of (layout.screens || [])) {
@@ -1288,6 +1305,8 @@ async function restoreLayout() {
                 console.warn('Skipping unrestoreable item', p.name, err.message);
             }
         }
+        // 3. Re-build shell blocks.
+        Blocks.deserialize(layout.blocks || []);
     } catch (err) {
         console.warn('restoreLayout failed', err);
     }
@@ -2269,6 +2288,11 @@ const Cmdline = (() => {
         clear:   { desc: '/clear N  - empty screen N',                                            run: (n) => { const d = fixedDesks[parseInt(n,10)-1]; if (d) d.detachScreen(); } },
         sit:     { desc: '/sit save NAME  |  /sit load NAME  |  /sit list  - save/load Situations', run: (...args) => situationsCmd(args) },
         cmd:     { desc: '/cmd add NAME BODY  |  /cmd list  |  /cmd rm NAME  - manage custom commands at runtime', run: (...args) => customCmd(args) },
+        block:   { desc: '/block KIND  - place floor|wall|ceiling|pillar|doorway|ramp at the camera (snap to grid). Add `smart` for MotherSort.', run: (kind, mode) => {
+            if (!kind) { setStatus('usage: /block KIND [smart]   kinds: ' + Blocks.KIND_ORDER.join(' | ')); return; }
+            if (mode === 'smart') Blocks.motherSort(kind);
+            else Blocks.placeAtCamera(kind);
+        } },
     };
 
     function run(line) {
@@ -2362,4 +2386,5 @@ window.lozsworld = {
     Notes, Settings, Situations, Dpad, MouseToggle, Cmdline,
     ACTIONS, bindings, runBinding,
     loadSituations, saveSituations, applySituation,
+    Blocks,
 };

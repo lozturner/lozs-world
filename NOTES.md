@@ -245,3 +245,57 @@ What v2 doesn't ship yet, in the order you'd want them:
    1280x720; expose an override on each Item's screen. ~30 lines.
 
 Each of these is contained: the Item class is the right factoring point.
+
+---
+
+# v3 additions: faster block generation
+
+The big shift: the room shell (walls, floors, ceilings, ramps, pillars,
+doorways) is no longer the same kind of thing as a chair or a dropped GLB.
+Building a memory-palace street should feel like Lego, not like wrestling
+with a 3D modeller, so block placement gets:
+
+- **Six-key palette.** Digits `1`-`6` place a snapped, oriented block in
+  front of the camera. `1` floor, `2` wall (auto-aligned to camera yaw at
+  90-degree increments), `3` ceiling, `4` pillar, `5` doorway, `6` ramp.
+- **MotherSort.** Hold `Shift` and the same digit, and the placement
+  oracle picks a smarter target: floors extend the nearest floor along
+  your gaze, walls land on the perimeter of the nearest floor on the side
+  facing you, ceilings stack on the nearest wall column, etc. Pure
+  deterministic rules - no AI calls, no surprises, predictable enough
+  that you build muscle memory in five minutes.
+- **Bracket extrude.** `[` `]` step the last placed block one grid unit
+  in -X / +X. `;` `'` step in -Z / +Z. `-` `=` step in -Y / +Y. So a row
+  of ten wall tiles is one place + nine extrudes.
+- **Grid is 1m floors / 2m wall heights / 0.15m wall thickness.** The
+  same constants live in `public/blocks.js` and are easy to retune.
+- **Shell items survive the cap recycler.** `enforceItemCap` now skips
+  items where `kind === 'shell'`. The decorative-chair-flood can no
+  longer eat your half-built room.
+- **Schema v3.** A new `blocks: [{blockKind, matrix}]` array joins
+  `screens` and `placed` in the saved layout. v2 layouts still load
+  (the new array defaults to `[]`).
+- **`/block KIND [smart]` command.** Same placement, but driven from
+  the slash command line - useful for testing, for keyboard-only
+  workflows, and as a building block for future macros and bots.
+
+The factoring lives in `public/blocks.js`. It receives the runtime deps
+(Item class, items array, camera, setStatus, saveLayout) via a single
+`createBlocksRuntime({...})` call. No circular import, no global
+mutation, and it can be unit-tested in isolation when we get to that.
+
+## Next steps the architecture is ready for
+
+1. **Block bots.** A bot is a function that calls `Blocks.placeAtCamera`
+   / `Blocks.motherSort` / `Blocks.extrude` from a prompt. The simplest
+   useful one: "build me a 3x3 room" -> 9 floors + 12 walls in a loop.
+2. **Group-and-snap.** Today blocks snap individually. A "group" would
+   be a saved sub-tree of blocks (e.g. "study nook"); spawning one is
+   N calls to `placeAtCamera` with the group's relative offsets.
+3. **Visual palette.** A toolbar strip of six block-kind buttons that
+   call the same functions the digits do, for users on tablets where
+   the keyboard isn't available.
+4. **Snap radius.** Today MotherSort uses the *nearest* shell of the
+   right kind regardless of distance. A radius cap (e.g. 4m) would
+   prevent placing a wall that snaps to a floor on the other side of
+   the room.
