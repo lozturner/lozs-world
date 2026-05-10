@@ -63,6 +63,7 @@ import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
 import { TDSLoader } from 'three/addons/loaders/TDSLoader.js';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 import { createBlocksRuntime } from './blocks.js';
+import { createBots } from './bots.js';
 
 // ---------- runtime config (public/config.json) ----------------------------
 //
@@ -1245,6 +1246,16 @@ const Blocks = createBlocksRuntime({
 });
 Blocks.registerHotkeys();
 
+// Bot runtime layered on top of Blocks. Bots compose primitive placements
+// into named structures (room, corridor, tower, ...) and run from the
+// /bot slash command or a programmatic call. They share saveLayout with
+// the rest of the world so a bot run is one persistence write per call.
+const Bots = createBots({
+    Blocks, items,
+    setStatus,
+    saveLayout: () => saveLayout(),
+});
+
 function saveLayout() {
     try {
         const layout = {
@@ -2293,6 +2304,10 @@ const Cmdline = (() => {
             if (mode === 'smart') Blocks.motherSort(kind);
             else Blocks.placeAtCamera(kind);
         } },
+        bot:     { desc: '/bot NAME [ARGS]  - run a build bot. names: room | corridor | wallrow | tower | staircase | clear', run: (name, ...args) => {
+            if (!name) { setStatus('usage: /bot NAME [ARGS]   names: ' + Object.keys(Bots.REGISTRY).join(' | ')); return; }
+            Bots.run(name, args);
+        } },
     };
 
     function run(line) {
@@ -2386,5 +2401,5 @@ window.lozsworld = {
     Notes, Settings, Situations, Dpad, MouseToggle, Cmdline,
     ACTIONS, bindings, runBinding,
     loadSituations, saveSituations, applySituation,
-    Blocks,
+    Blocks, Bots,
 };

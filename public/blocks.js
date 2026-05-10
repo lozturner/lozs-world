@@ -152,6 +152,14 @@ export function createBlocksRuntime({ Item, items, camera, setStatus, saveLayout
         return item;
     }
 
+    // Public direct-placement entry point. Bots use this to build patterns
+    // without depending on camera state - they pass exact world coordinates
+    // and the block snaps to the grid before being created.
+    function placeAt(kind, position, rotationY = 0) {
+        const snapped = snapPosition(kind, position.x, position.y, position.z);
+        return makeBlock(kind, snapped, rotationY);
+    }
+
     // Floor blocks anchor at y=0; walls anchor with their base at y=0; ceilings
     // anchor at WALL_H (top of a wall). Returns the position the block's
     // wrapper Group should be placed at to land on the grid.
@@ -354,9 +362,22 @@ export function createBlocksRuntime({ Item, items, camera, setStatus, saveLayout
         });
     }
 
+    // Where would a fresh placement at the camera's gaze land, snapped to the
+    // grid, *without* actually creating anything? Bots use this as their
+    // origin so a single "build a 3x3 room" call lands cleanly in front of
+    // the player no matter where they're standing.
+    function cameraOrigin() {
+        const { pos, fwd } = cameraFootprint(GRID * 1.5);
+        return {
+            origin: snapPosition('floor', pos.x, 0, pos.z),
+            yaw: yawFromDirection(fwd),
+            forward: fwd,
+        };
+    }
+
     return {
         PALETTE, KIND_ORDER, GRID, WALL_H, WALL_T,
-        placeAtCamera, motherSort, extrude,
+        placeAtCamera, motherSort, extrude, placeAt, cameraOrigin,
         serialize, deserialize, registerHotkeys,
         get lastPlaced() { return lastPlaced; },
     };
